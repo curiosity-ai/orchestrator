@@ -94,22 +94,147 @@ ORC_ADMIN_PASSWORD='choose-a-password' ORC_STORAGE="$HOME/.curiosity/orchestrato
 
 ### On a server
 
-A public server with a domain name, say `workspaces.example.com`:
+See [Running on a server](#running-on-a-server) for a public server with HTTPS from Let's Encrypt.
 
-1. Point DNS at the server: `workspaces.example.com`, and the wildcard `*.workspaces.example.com` for the
-   workspaces' own subdomains.
-2. Open ports 443 and 80.
-3. Start the orchestrator with Let's Encrypt (see [HTTPS with Let's Encrypt](#https-with-lets-encrypt)):
+## Running on a server
 
-   ```bash
-   ORC_ADMIN_PASSWORD='choose-a-password' \
-   ORC_STORAGE=/var/lib/curiosity-orchestrator \
-   ORC_PUBLIC_ADDRESS=https://workspaces.example.com \
-   ORC_LETSENCRYPT=true ORC_LETSENCRYPT_EMAIL=ops@example.com ORC_LETSENCRYPT_ACCEPT_TERMS=true \
-   curiosity-orchestrator
-   ```
+This sets up the orchestrator on a Linux server as a systemd service, with certificates from Let's Encrypt. The
+examples use `workspaces.example.com`; replace it with your own domain. To run it in Docker instead, see
+[Docker](#docker).
 
-Run it under your service manager (systemd, launchd, a Windows service) so it starts with the machine.
+### 1. Prepare the server
+
+- **DNS:** point two records at the server's public IP address (an `A` record, plus `AAAA` for IPv6):
+  - `workspaces.example.com`, for the orchestrator itself;
+  - `*.workspaces.example.com`, so that every workspace also has its own subdomain (`acme.workspaces.example.com`).
+- **Firewall:** open ports **80** and **443** to the internet. Let's Encrypt connects to them to check that you
+  control the names, and nothing else on the server may be using them.
+- **Docker:** install [Docker Engine](https://docs.docker.com/engine/install/) and make sure it starts at boot.
+
+### 2. Install
+
+Create a user for the service. It needs to be in the `docker` group to manage the workspaces' containers, and its
+home folder holds the orchestrator's data:
+
+```bash
+sudo useradd --system --create-home --home-dir /var/lib/curiosity-orchestrator --groups docker curiosity
+```
+
+Install the program into `/opt/curiosity`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/curiosity-ai/orchestrator/refs/heads/main/install.sh \
+  | sudo env ORC_INSTALL=/opt/curiosity ORC_NO_MODIFY_PATH=1 sh
+```
+
+### 3. Configure
+
+Put the settings in `/etc/curiosity-orchestrator.env`, readable by root only, since it holds the console password:
+
+```bash
+sudo install -m 600 /dev/null /etc/curiosity-orchestrator.env
+sudo nano /etc/curiosity-orchestrator.env
+```
+
+```ini
+ORC_ADMIN_PASSWORD=choose-a-long-password
+ORC_STORAGE=/var/lib/curiosity-orchestrator
+ORC_PUBLIC_ADDRESS=https://workspaces.example.com
+
+ORC_LETSENCRYPT=true
+ORC_LETSENCRYPT_EMAIL=ops@example.com
+ORC_LETSENCRYPT_ACCEPT_TERMS=true
+# Start with Let's Encrypt's staging server; remove this line once everything works (see step 5).
+ORC_LETSENCRYPT_STAGING=true
+```
+
+`ORC_LETSENCRYPT_ACCEPT_TERMS=true` accepts the Let's Encrypt
+[subscriber agreement](https://letsencrypt.org/repository/). The e-mail address gets expiry warnings if renewal
+ever fails. Every other setting is in [Configuration](#configuration); put it in the same file.
+
+### 4. Start the service
+
+Create `/etc/systemd/system/curiosity-orchestrator.service`:
+
+```ini
+[Unit]
+Description=Curiosity Orchestrator
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+User=curiosity
+Group=curiosity
+SupplementaryGroups=docker
+EnvironmentFile=/etc/curiosity-orchestrator.env
+WorkingDirectory=/var/lib/curiosity-orchestrator
+ExecStart=/opt/curiosity/orchestrator/curiosity-orchestrator
+# Lets the service listen on ports 80 and 443 without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now curiosity-orchestrator
+journalctl -u curiosity-orchestrator -f
+```
+
+The orchestrator now listens on 443 (HTTPS) and 80 (which answers Let's Encrypt and redirects everything else to
+HTTPS). Within a minute it should log the certificate for `workspaces.example.com` being issued.
+
+### 5. Check it, then switch to real certificates
+
+1. Open `https://workspaces.example.com/#/manage` and sign in as `admin`. With the staging server your browser warns
+   that the certificate is not trusted: that is expected, staging certificates are for testing only.
+2. Open **Settings**. Every host name should show as valid. A name that failed (DNS not pointing at the server yet,
+   a port closed) is retried every 15 minutes; the log says why it failed.
+3. Create a workspace and open it at `https://acme.workspaces.example.com/`. Its certificate is issued within
+   about 10 minutes of creating it.
+
+When all of that works, switch to real certificates. Remove the `ORC_LETSENCRYPT_STAGING=true` line from
+`/etc/curiosity-orchestrator.env`, then delete the staging certificates, which would otherwise be kept until they
+are due for renewal:
+
+```bash
+sudo systemctl stop curiosity-orchestrator
+sudo rm -rf /var/lib/curiosity-orchestrator/letsencrypt
+sudo systemctl start curiosity-orchestrator
+```
+
+### Upgrading
+
+Run the install command again, then restart the service:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/curiosity-ai/orchestrator/refs/heads/main/install.sh \
+  | sudo env ORC_INSTALL=/opt/curiosity ORC_NO_MODIFY_PATH=1 sh
+sudo systemctl restart curiosity-orchestrator
+```
+
+Restarting the orchestrator does not stop the workspaces, and certificates are kept in
+`/var/lib/curiosity-orchestrator/letsencrypt`, so nothing is re-issued.
+
+### Variations
+
+- **Your own certificate** instead of Let's Encrypt: leave out the `ORC_LETSENCRYPT*` lines and set `ORC_CERT_FILE`
+  (a PFX, or a PEM with `ORC_CERT_FILE_PRIVATE_KEY`), plus `ORC_PORT_HTTP=80` to redirect `http://` to HTTPS. It
+  must cover `*.workspaces.example.com` too for the workspaces' subdomains.
+- **A separate host name for the console**, recommended when workspace administrators are not fully trusted (see
+  [Security](#security)): add `ORC_MANAGEMENT_HOST=manage.example.com` and a DNS record for it. Let's Encrypt
+  includes it in the orchestrator's certificate.
+- **No subdomains:** with `ORC_SUBDOMAIN_ROUTING=false` workspaces are served only at
+  `https://workspaces.example.com/{slug}/`. Then no wildcard DNS record is needed, and only one certificate is
+  issued.
+- **Without systemd:** the service needs permission to listen on ports below 1024. Either run it as root, or grant
+  the program that permission with
+  `sudo setcap cap_net_bind_service=+ep /opt/curiosity/orchestrator/curiosity-orchestrator`. An upgrade replaces
+  that file, so run `setcap` again after each one.
 
 ## Docker
 
@@ -171,6 +296,30 @@ volumes:
 
 ```bash
 ORC_ADMIN_PASSWORD='choose-a-password' docker compose up -d
+```
+
+This serves HTTPS with a self-signed certificate. For certificates from Let's Encrypt, prepare DNS and the firewall
+as in [Running on a server](#1-prepare-the-server), then replace the `environment` section with:
+
+```yaml
+    environment:
+      - ORC_ADMIN_PASSWORD=${ORC_ADMIN_PASSWORD:?Set ORC_ADMIN_PASSWORD}
+      - ORC_PUBLIC_ADDRESS=https://workspaces.example.com
+      - ORC_PORT=443
+      - ORC_PORT_HTTP=8080              # the port published as 80: Let's Encrypt, and the redirect to HTTPS
+      - ORC_LETSENCRYPT=true
+      - ORC_LETSENCRYPT_EMAIL=ops@example.com
+      - ORC_LETSENCRYPT_ACCEPT_TERMS=true
+      - ORC_LETSENCRYPT_STAGING=true    # remove once it works, see below
+```
+
+Check it as in [step 5](#5-check-it-then-switch-to-real-certificates). To switch from staging to real
+certificates, remove the staging line and delete the staging certificates from the data volume:
+
+```bash
+docker compose stop
+docker compose run --rm --entrypoint rm orchestrator -rf /data/letsencrypt
+docker compose up -d
 ```
 
 In a container, the orchestrator joins the workspaces' Docker network and reaches each one by container name.
@@ -304,11 +453,7 @@ first label of the host names the workspace.
 
 ### HTTPS with Let's Encrypt
 
-```bash
-ORC_ADMIN_PASSWORD='choose-a-password' ORC_PUBLIC_ADDRESS=https://workspaces.example.com \
-ORC_LETSENCRYPT=true ORC_LETSENCRYPT_EMAIL=ops@example.com ORC_LETSENCRYPT_ACCEPT_TERMS=true \
-curiosity-orchestrator
-```
+[Running on a server](#running-on-a-server) walks through the setup. How it works:
 
 | Host name | Certificate |
 |---|---|
@@ -317,13 +462,16 @@ curiosity-orchestrator
 | anything else (an IP address, a name still waiting) | `ORC_CERT_FILE` when set, otherwise a self-signed certificate |
 
 - **Requirements:** ports 443 and 80 reachable from the internet, and DNS for every name pointing at the server.
+  Names are validated over TLS on 443, or over HTTP on `ORC_PORT_HTTP`.
+- **No wildcard certificate:** that would need a DNS challenge, so each workspace gets a certificate of its own.
 - **Renewal** happens 30 days before expiry. Certificates and the account key are kept in
   `ORC_STORAGE/letsencrypt`; back that folder up with the rest of `ORC_STORAGE`.
 - **Failures** (DNS not set up yet, a port closed) are retried every 15 minutes, which stays within Let's
   Encrypt's limits.
 - **Status:** the console's **Settings** page lists every name with its state and expiry.
 - **Rate limits:** Let's Encrypt issues 50 certificates per registered domain per week, and each workspace is one.
-  Use `ORC_LETSENCRYPT_STAGING=true` while trying things out.
+  Use `ORC_LETSENCRYPT_STAGING=true` while trying things out, and delete `ORC_STORAGE/letsencrypt` when you
+  switch to the real server.
 
 ### The workspace administrator
 
