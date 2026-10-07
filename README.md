@@ -27,13 +27,13 @@ The releases are self-contained: no .NET installation is needed. All you need is
 **Linux and macOS:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/curiosity-ai/orchestrator/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/curiosity-ai/orchestrator/refs/heads/main/install.sh | sh
 ```
 
 **Windows** (PowerShell 5.1 or 7):
 
 ```powershell
-irm https://raw.githubusercontent.com/curiosity-ai/orchestrator/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/curiosity-ai/orchestrator/refs/heads/main/install.ps1 | iex
 ```
 
 The script downloads the latest release for your platform and checks its SHA-256. It installs the program in
