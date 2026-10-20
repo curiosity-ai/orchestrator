@@ -114,10 +114,12 @@ examples use `workspaces.example.com`; replace it with your own domain. To run i
 ### 2. Install
 
 Create a user for the service. It needs to be in the `docker` group to manage the workspaces' containers, and its
-home folder holds the orchestrator's data:
+home folder holds the orchestrator's data. `--user-group` creates a `curiosity` group even where `/etc/login.defs`
+sets `USERGROUPS_ENAB no`, and the data folder is opened to that group, so admins in it can read and manage the data:
 
 ```bash
-sudo useradd --system --create-home --home-dir /var/lib/curiosity-orchestrator --groups docker curiosity
+sudo useradd --system --user-group --create-home --home-dir /var/lib/curiosity-orchestrator --groups docker curiosity
+sudo chmod 770 /var/lib/curiosity-orchestrator
 ```
 
 Install the program into `/opt/curiosity`:
@@ -166,6 +168,8 @@ After=network-online.target docker.service
 User=curiosity
 Group=curiosity
 SupplementaryGroups=docker
+# New data files stay readable and writable by the curiosity group, like the folder itself.
+UMask=0007
 EnvironmentFile=/etc/curiosity-orchestrator.env
 WorkingDirectory=/var/lib/curiosity-orchestrator
 ExecStart=/opt/curiosity/orchestrator/curiosity-orchestrator

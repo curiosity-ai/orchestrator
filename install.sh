@@ -156,6 +156,9 @@ main() {
   BIN_DIR="$INSTALL_ROOT/bin"
   APP_DIR="$INSTALL_ROOT/orchestrator"
   NEW_PATH_HINT=0
+  # Program files are readable by everyone whatever the caller's umask, so a service account can run an
+  # install made by root (sudo with umask 027 would otherwise lock it out of $INSTALL_ROOT).
+  umask 022
 
   command -v curl >/dev/null 2>&1 || need wget
   need awk
@@ -246,7 +249,8 @@ Releases: https://github.com/$REPO/releases"
     warn "no checksum published for $ASSET; installing it unverified"
   fi
 
-  tar -xzf "$work/$ASSET" -C "$work" || die "could not unpack $ASSET"
+  # Owned by whoever installs, not by the build machine's uid stored in the archive.
+  tar --no-same-owner -xzf "$work/$ASSET" -C "$work" || die "could not unpack $ASSET"
   unpacked="$work/$NAME-$version-$RID"
   [ -x "$unpacked/$NAME" ] || die "$ASSET does not hold $NAME-$version-$RID/$NAME"
 
