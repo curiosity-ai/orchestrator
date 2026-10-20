@@ -117,7 +117,7 @@ Create a user for the service. It needs to be in the `docker` group to manage th
 home folder holds the orchestrator's data:
 
 ```bash
-sudo useradd --system --create-home --home-dir /var/lib/curiosity-orchestrator --groups docker curiosity
+sudo useradd --system --user-group --create-home --home-dir /var/lib/curiosity-orchestrator --groups docker curiosity
 ```
 
 Install the program into `/opt/curiosity`:
