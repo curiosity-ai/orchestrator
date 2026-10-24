@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/orchestrator-lockup-on-ink.svg">
+    <img alt="Curiosity Orchestrator" src="assets/orchestrator-lockup.svg" height="64">
+  </picture>
+</p>
+
 # Curiosity Orchestrator
 
 Host several [Curiosity](https://curiosity.ai) workspaces on one machine, behind a single address.
