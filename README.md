@@ -109,6 +109,14 @@ This sets up the orchestrator on a Linux server as a systemd service, with certi
 examples use `workspaces.example.com`; replace it with your own domain. To run it in Docker instead, see
 [Docker](#docker).
 
+**Shortcut:** once the server is prepared (step 1), `install-service.sh` does steps 2 to 4: it asks for the domain, the
+Let's Encrypt e-mail address and the console password (or takes them from environment variables, see the top of the
+script), then creates the user, installs the program, writes the settings file and the unit, and starts the service.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/curiosity-ai/orchestrator/refs/heads/main/install-service.sh | sudo sh
+```
+
 ### 1. Prepare the server
 
 - **DNS:** point two records at the server's public IP address (an `A` record, plus `AAAA` for IPv6):
@@ -182,8 +190,10 @@ WorkingDirectory=/var/lib/curiosity-orchestrator
 ExecStart=/opt/curiosity/orchestrator/curiosity-orchestrator
 # Lets the service listen on ports 80 and 443 without running as root.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
-Restart=on-failure
-RestartSec=10
+# The orchestrator exits with 75 to restart itself into a new version; Restart=always starts it again.
+Restart=always
+SuccessExitStatus=75
+RestartSec=5
 TimeoutStopSec=60
 
 [Install]
@@ -220,7 +230,15 @@ sudo systemctl start curiosity-orchestrator
 
 ### Upgrading
 
-Run the install command again, then restart the service:
+`update-service.sh` does the following in one go: it installs the latest release, restarts the service, keeps the
+previous program as `/opt/curiosity/orchestrator.previous`, and puts it back by itself if the new one does not stay
+up (`update-service.sh --rollback` does it by hand).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/curiosity-ai/orchestrator/refs/heads/main/update-service.sh | sudo sh
+```
+
+Or by hand: run the install command again, then restart the service:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/curiosity-ai/orchestrator/refs/heads/main/install.sh \
